@@ -178,7 +178,6 @@ For linear regression problems people typically use a **cost** function that mea
 
 
 # Typical workflow
-
 - Study the data
 - Select a model
 - Train the model on the training data (i.e., the learning algorithm searched for the model parameter values that minimize a cost function)
@@ -216,8 +215,8 @@ That is data full of errors, outliers and noise.
 
 The following are a couple examples of when you’d want to clean up training data:
 
-• If some instances are clearly outliers, it may help to simply discard them or try to fix the errors manually.
-• If some instances are missing a few features (e.g., 5% of your customers did not specify their age), you must decide whether you want to ignore this attribute altogether, ignore these instances, fill in the missing values (e.g., with the median age), or train one model with the feature and one model without it.
+• If some instances are clearly outliers, you should discard them or try to fix them manually.
+• If some instances are missing a few features (e.g., 5% of your customers did not specify their age), you must decide whether you want to ==ignore this attribute altogether==, ==ignore these specific instances==, ==fill in the missing values== (e.g., with the median age), or ==train one model with the feature and one model without it==.
 
 ### Irrelevant Features
 The system will only be capable of learning if the training data contains enough relevant features and not too many irrelevant ones.
@@ -245,7 +244,8 @@ That is to say it thinks all data out there must look like the training data, it
 If the training set is noisy, or if it is too small, which introduces sampling noise, then the model is likely to detect patterns in the noise itself. 
 Said patterns will not generalize to new instances.
 
->For example, say you feed your life satisfaction model many more attributes, including uninformative ones such as the country’s name. In that case, a complex model may detect patterns like the fact that all countries in the training data with a w in their name have a life satisfaction greater than 7: New Zealand (7.3), Norway (7.6), Sweden (7.3), and Switzerland (7.5). How confident are you that the w-satisfaction rule generalizes to Rwanda or Zimbabwe?
+>If you feed the life satisfaction model other attributes, including uninformative/irrelevant ones like the country’s name, it might detect a false pattern like the fact that all countries in the training data with a w in their name have a life satisfaction greater than 7: New Zealand (7.3), Norway (7.6), Sweden (7.3), and Switzerland (7.5). 
+>However this 'w-satisfaction' rule will probably not generalize to new data points like Rwanda or Zimbabwe.
 
 ![The importance of data versus algorithms](overfitting.png)
 
@@ -370,12 +370,39 @@ Once you have a model that performs well on both the train-dev set and the dev s
 
 
 
+# Code example
 
+From the Jupyter notebook of this chapter, assume `df` contains the data which you've previously gathered and prepared.
+In the [[Chapter 2#Scikit learn design|Scikit learn design]] section of Chapter 2 you'll learn a bit more about these `scikit.learn` , how they're used, what methods they have.
+For now simply notice how we use the method `fit()` with two datasets, one for the features and one for the labels to train the model.
+And then the method `predict()` with some new data (could also be a full on dataset) to actually use the model.
 
+This is the absolute simplest way to use a model to make predictions.
+Get the data, clean it up, look at it, pick a model, call `fit()`, call `predict()`, ???, profit.
 
+```python
+from sklearn.linear_model import LinearRegression
 
+# Download and prepare the data
 
+X = df[["GDP per capita"]].values
+y = df[["Democracy index"]].values
 
+  
 
+# Visualize the data
 
+df.plot(kind='scatter', grid=True, x="GDP per capita", y="Democracy index")
+plt.show()
 
+# Select a linear model
+model = LinearRegression()
+
+# Train the model
+model.fit(X, y)
+
+# Make a prediction for Puerto Rico
+X_new = [[33_442.8]]  # Puerto Rico' GDP per capita in 2020
+
+print(model.predict(X_new)) # outputs [[6.01610329]]
+```

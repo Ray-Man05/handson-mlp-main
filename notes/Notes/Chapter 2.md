@@ -1630,3 +1630,476 @@ array([
 ![alt text](<../Images/Chapter 2/gaussian_rbf_clusters.png>)
 
 ## Transformation Pipelines
+
+There are many data transformation steps that need to be executed in the **right order**.
+You can use the Scikit-Learn class `Pipeline` for sequences of transformations, here's an example that can be used to impute then scale numerical attributes:
+
+```python
+from sklearn.pipeline import Pipeline
+
+num_pipeline = Pipeline([
+	("impute", SimpleImputer(strategy="median")),
+	("standardize", StandardScaler()),
+])
+```
+
+### Making a pipeline
+
+The pipeline constructor takes a list of tuples of name/estimator pairs which defines a sequence of steps.
+==Names are arbitrary as long as they're unique and don't contain double underscores ( __ )==.
+They'll be useful for hyperparameter tuning.
+==The estimators must all be transformers (they must all have a `fit_transform()` method) except for the last one, which can be anything transformer/predictor/any type of estimator.==
+
+
+>[!Info]
+>
+>In a Jupyter notebook, if you import sklearn and run `sklearn.set_config(display="diagram")`, all Scikit-Learn estimators willbe rendered as interactive diagrams. 
+>This is particularly useful for visualizing pipelines. 
+>To visualize num_pipeline, run a cell with num_pipeline as the last line. 
+>Clicking an estimator will show more details.
+>
+>![[visualize_pipeline.png]]
+
+You can also use the `make_pipeline()` function, it automatically assigns names to transformers based on their classes names (in lowercase and without underscores e.g., `SimpleImputer` -> "`simpleimputer`").
+If multiple transformers have the same name, an index is appended to their names (e.g., "`simpleimputer-1`", "`simpleimputer-2`")
+
+### Fit: 
+  When you call a pipeline's `fit()` method, it calls `fit_transform()` sequentially on all the transformers, passing the output of each call as the parameter of the next call until it reaches the final estimator for which it just calls `fit()`.
+  The pipeline exposes the same methods as the final estimator.
+  For example here the pipeline will essentially act the same as a `StandardScaler`.
+  
+### Transform / Predict: 
+  When you call a pipeline's transform method, it will sequentially apply all the transformations to the data.
+  ==If the last estimator were a predictor instead of a transformer then the pipeline would have a `predict()` method rather than a `transform()` method.==
+  Calling `predict()` would sequentially apply all the transformations to the data and pass the result to the predictor's `predict()` method.
+
+---
+
+Here's an example of that pipeline being used:
+
+```python
+>>> housing_num_prepared = num_pipeline.fit_transform(housing_num)
+>>> housing_num_prepared[:2].round(2)
+array([[-1.42, 1.01, 1.86, 0.31, 1.37, 0.14, 1.39, -0.94],
+[ 0.6 , -0.7 , 0.91, -0.31, -0.44, -0.69, -0.37, 1.17]])
+```
+
+Then you can recover a DataFrame using the pipeline's `get_feature_names_out()`, the same as any estimator:
+
+```python
+df_housing_num_prepared = pd.DataFrame(
+	housing_num_prepared, 
+	columns=num_pipeline.get_feature_names_out(),
+	index=housing_num.index
+)
+```
+
+### Accessing the estimators
+
+==Pipelines support **indexing**==, `pipeline[1]` returns the second estimator, `pipeline[:-1]` returns ==a `Pipeline` object== containing all but the first estimator.
+
+You can also use the **`steps`** attribute, which is a **list** of name/estimator pairs, or the **`named_steps`** **dictionary** attribute, which maps the names to the estimators.
+
+For example `num_pipeline["simpleimputer"]` returns the estimator named "`simpleimputer`". 
+
+### ColumnTransformer
+
+It's more convenient to have a single transformer capable of handling all columns and applying the appropriate transformation to each, whether they be numerical or categorical.
+
+The following `ColumnTransformer` will apply `num_pipeline` to the numerical attributes and `cat_pipeline` to the categorical attributes (there's just the one in this case):
+
+```python
+from sklearn.compose import ColumnTransformer
+
+num_attribs = ["longitude", "latitude", "housing_median_age", "total_rooms",
+"total_bedrooms", "population", "households", "median_income"]
+cat_attribs = ["ocean_proximity"]
+
+num_pipeline = make_pipeline(
+	SimpleImputer(strategy="median"), 
+	StandardScaler()
+)
+cat_pipeline = make_pipeline(
+	SimpleImputer(strategy="most_frequent"),
+	OneHotEncoder(handle_unknown="ignore")
+)
+
+preprocessing = ColumnTransformer([
+	("num", num_pipeline, num_attribs),
+	("cat", cat_pipeline, cat_attribs),
+])
+```
+
+The `ColumnTransformer` takes as an argument to its constructor a list of 3 item tuples.
+Each tuple has a string to use as a name for the transformer (must be unique, shouldn't contain double underscores), the transformer itself, then a list of the names of columns on which the transformer should be applied (you can use indices instead of names to refer to the columns, or a `make_column_selector` class as seen below.).
+
+>[!Info]
+>
+>Instead of using a transformer (in one of those tuples), you can use the string `"drop"` to signify that those columns should be dropped. 
+>
+>Or the string `"passthrough"` to specify the columns that should be left untouched.
+>By default, all the columns that weren't listed will be dropped, but you can set the `remainder` hyperparameter to any transformer (or to `"passthrough"`) for these columns to be handled differently.
+
+#### *`make_column_selector` /  `make_column_transformer()`*
+
+Instead of listing all the column names you can use the Scikit-Learn ==class `make_column_selector`== to ==automatically select all the features of a given type==, such as numerical or categorical.
+
+```python
+from sklearn.compose import make_column_transformer
+
+preprocessing = ColumnTransformer([
+	("num", num_pipeline, make_column_selector(dtype_include=np.number)),
+	("cat", cat_pipeline, make_column_selector(dtype_include=object)),
+])
+```
+
+If you don't care about naming the transformers you can use the ==function `make_column_transformer()`== (instead of the constructor) which chooses the names for you (just like `make_pipeline()` does):
+
+```python
+from sklearn.compose import make_column_selector, make_column_transformer
+
+preprocessing = make_column_transformer(
+	(num_pipeline, make_column_selector(dtype_include=np.number)),
+	(cat_pipeline, make_column_selector(dtype_include=object)),
+)
+
+```
+
+You can then apply this `ColumnTransformer` to the housing data:
+
+```python
+housing_prepared = preprocessing.fit_transform(housing)
+```
+
+>[!warning]+ Return type
+>
+>Remember how one-hot encoding creates a column for each category which results in a lot of columns with a lot of zeros, so it gets represented as a sparse matrix.
+>
+>> The *`OneHotEncoder`* returns a *sparse matrix* and the **`num_pipeline`** returns a **dense matrix**.
+>> 
+>> When there is such a ==mix of sparse and dense matrices==, the `ColumnTransformer` ==estimates the density of the final matrix== (i.e., the ratio of nonzero cells), and it ==returns a sparse matrix if the density is lower than a given threshold== (by default, `sparse_threshold=0.3`). 
+>> In this example, it returns a dense matrix.
+
+
+Now this processing pipeline can take the entire training dataset and apply the appropriate transformer for each column.
+It then concatenates the transformed columns horizontally (transformers must **never** change the number of rows).
+This returns a NumPy array, which you can wrap in a DataFrame using the column names from `preprocessing.get_feature_names_out()`.
+
+
+# Recap
+This brings everything that was seen up until now together when it comes to preprocessing data.
+
+In the book's example, you'll wanna create a single pipeline that will perform all the transformations, here's what this pipeline will do and why:
+
+- It'll **impute** missing **numerical values** and replace them with the **median**.
+  For **categorical features** missing values we'll use the **most frequent category**.
+  ==Most ML algorithms don't expect missing values.==
+  
+- The **categorical feature** will be **one-hot encoded**.
+  ==Most ML algorithms only accept numerical inputs.==
+  
+- A few 'new' **ratio features will be computed and added**: `bedrooms_ratio`, `rooms_per_house`, and `people_per_house`.
+  These ==may better correlate with the median house value== and thereby help the ML models.
+  
+- A few **cluster similarity features will be added**.
+  These will likely be more useful to the model than latitude and longitude. (sort of conveys proximity to expensive areas/urban areas and such)
+  
+- **Features** with a **long tail** will be replaced by their **logarithms**.
+  Most ==models prefer== features with roughly ==uniform or Gaussian distributions==.
+  
+- **All numerical values** will be **standardized**. (standard distribution $\mu=0$ and $\sigma=1$)
+  Most ==ML algorithms prefer== when ==**all features** have roughly the **same scale**==.
+
+
+Here's the code that builds the pipeline to do all of this:
+
+1. Divides every element of the first column by the corresponding element of second column and returns it as a result column (element-wise division, you're supposed to pass it the two columns from which the new feature will be computed)
+   Will be used to compute `people_per_house` = `population` / `households` for example.
+   `X[:, [n]]` selects all rows of the nth column, the double brackets keep it as a 2D array.
+   
+2. The `ColumnTransformer` automatically prefixes each feature name with its transformer name (e.g., `"bedrooms" + "__" + "ratio"` -> `"bedrooms__ratio"`)
+   For three of the items, the transformers are named after the features not the transformation (`"bedrooms"` rather than `"ratio"`, etc.) , this is to differentiate between them.
+   So we use the feature name to convey the transformation applied (`"ratio"`).
+   
+3. Creates a reusable `Pipeline` for computing generic ratios, the pipeline expects two-column data as an entry, imputes missing values with the median, then it produces a resulting ratio column, scales it and returns it.
+   
+4. A generic pipeline for transforming a feature into its log, imputes using the median, applies the log (`feature_names="one-to-one"`) preserves the original feature names, then scales it and returns it.
+   
+5. For each data point, compute similarity to 10 clusters using RBF, then outputs 10 new features, one for each cluster, representing similarity between the datapoint and the cluster.
+   
+6. A simple pipeline for numerical values, imputes, scales and returns the feature.
+   
+7. Handles categorical features of any non-numerical type "`dtype_include=object`", imputes with the most common value, ignores values that weren't seen during training.
+   
+8. THE transformer you'll now use on the raw data. It's a `ColumnTransformer` to process different columns differently at the same time.
+   
+   For the first three ratio components, each uses `ratio_pipeline()`, each will process those two columns given and output a new feature 
+   (e.g., [`"total_bedrooms"`, `"total_rooms"`] -> `"bedrooms__ratio"`)
+   
+   The `log_pipeline` is applied to almost all numerical values.
+   The `cluster_simil` transformer processes latitude and longitude to make a new geographical similarity feature.
+   By the end every column of the raw data has been processed save for `"housing_median_age"`, we use the `default_num_pipeline` for this and any remaining feature.
+   
+   For the names of the resulting features, each is made by concatenating the transformer's name and the original feature's name:
+   `final_name` = `transformer_name` + "`__`" + `feature_name`
+   For the ratio stuff, the author sort of reversed the transformer's name and feature's name.
+   The tuples in column transformer use the feature's name to call the transformer ("`bedrooms"` instead of `"ratio"`, elsewise you'd have 3 transformers all called ratio), and then the `ratio_pipeline()` function uses `"ratio"` as the feature name.
+
+```python
+# 1
+def column_ratio(X):
+	return X[:, [0]] / X[:, [1]]
+# 2
+def ratio_name(function_transformer, feature_names_in):
+	return ["ratio"] # feature names out
+# 3
+def ratio_pipeline():
+	return make_pipeline(
+			SimpleImputer(strategy="median"),
+			FunctionTransformer(column_ratio, feature_names_out=ratio_name),
+			StandardScaler()
+		)
+
+# 4
+log_pipeline = make_pipeline(
+	SimpleImputer(strategy="median"),
+	FunctionTransformer(np.log, feature_names_out="one-to-one"),
+	StandardScaler()
+)
+
+# 5
+cluster_simil = ClusterSimilarity(n_clusters=10, gamma=1., random_state=42)
+
+# 6
+default_num_pipeline = make_pipeline(
+	SimpleImputer(strategy="median"),
+	StandardScaler()
+)
+
+# 7
+cat_pipeline = make_pipeline(
+	SimpleImputer(strategy="most_frequent"),
+	OneHotEncoder(handle_unknown="ignore")
+)
+
+# 8
+preprocessing = ColumnTransformer(
+	[
+	("bedrooms", ratio_pipeline(), ["total_bedrooms", "total_rooms"]),
+	("rooms_per_house", ratio_pipeline(), ["total_rooms", "households"]),
+	("people_per_house", ratio_pipeline(), ["population", "households"]),
+	("log", log_pipeline, ["total_bedrooms", "total_rooms", "population",                                     "households", "median_income"]),
+	("geo", cluster_simil, ["latitude", "longitude"]),
+	("cat", cat_pipeline, make_column_selector(dtype_include=object)),
+	],
+	remainder=default_num_pipeline
+	) # one column remaining: housing_median_age
+```
+
+
+
+The result is a NumPy array with 24 features. 
+It include 3 computed ratios, 10 cluster similarity features, 5 categorical features and 6 of the original features that were just transformed.
+
+
+```python
+
+>>> housing_prepared = preprocessing.fit_transform(housing)
+>>> housing_prepared.shape
+(16512, 24)
+>>> preprocessing.get_feature_names_out()
+# All features invariably go through an imputation step before anything else is applied
+array([
+	# Ratios, notice the naming switcheroo, see above
+	'bedrooms__ratio', 
+	'rooms_per_house__ratio',
+	'people_per_house__ratio', 
+	# Numerical attributes, log and standardization
+	'log__total_bedrooms',
+	'log__total_rooms', 
+	'log__population', 
+	'log__households',
+	'log__median_income', 
+	# Clusters, RBF similarity, one-hot encoding
+	'geo__Cluster 0 similarity', 
+	[...],
+	'geo__Cluster 9 similarity', 
+	# one-hot encoding
+	'cat__ocean_proximity_<1H OCEAN',
+	'cat__ocean_proximity_INLAND', 
+	'cat__ocean_proximity_ISLAND',
+	'cat__ocean_proximity_NEAR BAY', 
+	'cat__ocean_proximity_NEAR OCEAN',
+	# Standardization
+	'remainder__housing_median_age'], 
+	dtype=object)
+
+```
+
+
+# Select and Train a Model
+
+You framed the problem, you got the data, you explored it, sampled a training set and a test set then made a preprocessing pipeline to automatically clean up and prepare the data.
+Now you must select and train a machine learning model.
+
+## Train and Evaluate on the Training Set
+
+### LinearRegression
+
+First you can try training a very basic linear regression model to get started:
+
+```python
+from sklearn.linear_model import LinearRegression
+
+lin_reg = make_pipeline(preprocessing, LinearRegression())
+lin_reg.fit(housing, housing_labels)
+```
+
+And then we can try it out on the training set itself and compare the first five predictions to the labels:
+
+```python
+>>> housing_predictions = lin_reg.predict(housing)
+>>> housing_predictions[:5].round(-2) # -2 = rounded to the nearest hundred
+array([246000., 372700., 135700., 91400., 330900.])
+>>> housing_labels.iloc[:5].values
+array([458300., 483800., 101700., 96100., 361800.])
+```
+
+The first prediction is way off, the others still deviate by around 10% to 25%.
+
+==Remember that you chose to use the RMSE as your performance measure.==
+To measure this linear regression model's RMSE on the whole training set, we can use the Scikit-Learn function [`root_mean_squared_error()`](https://scikit-learn.org/stable/modules/generated/sklearn.metrics.root_mean_squared_error.html#sklearn.metrics.root_mean_squared_error) (simply pass the true labels and the predicted values to this function):
+
+```python
+>>> from sklearn.metrics import root_mean_squared_error
+
+>>> lin_rmse = root_mean_squared_error(housing_labels, housing_predictions)
+>>> lin_rmse
+68972.88910758484
+```
+
+We're not using the **`score()`** method to assess performance because it uses a **different metric** than RMSE.
+`score()` returns the $R^2$ *coefficient of determination* instead of the RMSE.
+
+This coefficient represents the ratio of the variance in the data that the model can explain, it goes from $-\infty$ to 1, the closer to 1 the better.
+If the model simply predicts the mean all the time and does not explain any of the variance, then $R^2=0$. If the model does even worse than that, then the score can be negative.
+Here's a helpful [StatQuest video](https://www.youtube.com/watch?v=2AQKmw14mHM) on $R^2$.
+
+Also a reminder regarding RMSE:
+
+![[Chapter 2#RMSE ($l_{2}$ norm)]]
+
+---
+
+Most median values range from $\$120,000$ to $\$265,000$, a typical prediction error of almost $\$69,000$ is unacceptable.
+This is an example of **underfitting**. 
+
+![[Studying/Self/HOMLP/Notes/Chapter 1#Underfitting the training data]]
+
+This can mean that the features do not provide enough information to make good predictions, or that the model is not powerful enough.
+The model is not regularized so there are no constraints to be reduced, and before trying to add more features you could try a more complex model.
+
+### DecisionTreeRegressor
+This is a fairly powerful model capable of finding complex nonlinear relationships in the data. (decision trees will be presented in more detail in Chapter 5):
+
+```python
+from sklearn.tree import DecisionTreeRegressor
+
+tree_reg = make_pipeline(preprocessing, DecisionTreeRegressor(random_state=42))
+tree_reg.fit(housing, housing_labels)
+```
+
+And then you may evaluate it on the training set:
+
+```python
+>>> housing_predictions = tree_reg.predict(housing)
+>>> tree_rmse = root_mean_squared_error(housing_labels, housing_predictions)
+>>> tree_rmse
+
+0.0
+```
+
+When you see no error at all, it's much more likely that the model has badly overfit the data, rather than it being perfect.
+You should **not** touch the test set until you are ready to launch a model you are very confident about.
+So in order to assess whether this model is good or has overfitted, you'll need to ==use part of the training set for training, and part of it for model validation==.
+
+Such an evaluation isn't utterly useless though, a seemingly great performance here with a poor one in a different evaluation technique with validation sets may indicate overfitting.
+
+## Better Evaluation Using **Cross-Validation**
+You could simply use the function `train_test_split()` once more to split the training set into a smaller training set and a validation set, then train models against the smaller training set and evaluate them on the validation set. It's a bit cumbersome but it works.
+
+A great alternative is to use Scikit-Learn's *k-fold cross-validation* feature.
+
+It splits the training set into **k non-overlapping subsets called folds**, then the model is trained and evaluated $k$ times.
+For each iteration $i$ from 1 to $k$, the model is trained the whole dataset save for fold number $i$, then it is evaluated against the $i^{th}$ fold, and so on.
+This process produces $k$ evaluation scores.
+
+![[k-fold_cross-validation.png]]
+
+Scikit-Learn provides a [`cross_val_score()`](https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.cross_val_score.html) function which can take in as arguments the estimator, the data, the labels, a scoring strategy to evaluate the performance of the estimator across cross-validation splits and the number of folds:
+
+```python
+from sklearn.model_selection import cross_val_score
+
+tree_rmses = -cross_val_score(
+	tree_reg, 
+	housing, 
+	housing_labels,
+	scoring="neg_root_mean_squared_error", 
+	cv=10
+)
+```
+
+>[!Danger] Minus sign
+>
+>Scikit-Learn's cross-validation functions such as `cross_val_score` expect a utility function, a higher score means the performance is better. (e.g., accuracy, $R^2$, precision)
+>Whereas for error metrics lower is better. (e.g., MSE, RMSE, MAE).
+>
+>To unify the logic across the board, Scikit-Learn returns the negative values for metrics that need to be lowered, including the RMSE, so that when you're selecting the best
+>
+>Pseudocode to illustrate, here's what sklearn would need to do without this convention:
+>```python
+>if metric in ["accuracy", "r2", "precision"]: 
+>	best_model = model_with_HIGHEST_score 
+>elif metric in ["rmse", "mae", "mse"]: 
+>	best_model = model_with_LOWEST_score 
+>else: 
+>	???
+>```
+>
+>Now with that convention, where you flip the sign of what needs to be minimized, you always just gotta look for the highest score:
+>
+>```python
+># Across any and all metrics
+>best_model = model_with_HIGHEST_score 
+>```
+
+The values returned by the function are negative because of the API implementation detail explained above, just flip the sign then take a look at the results:
+
+```python
+>>> pd.Series(tree_rmses).describe()
+count 10.000000
+mean 66573.734600
+std 1103.402323
+min 64607.896046
+25% 66204.731788
+50% 66388.272499
+75% 66826.257468
+max 68532.210664
+dtype: float64
+```
+
+Now you can see that the decision tree isn't performing well at all, it looks almost as bad as the linear regression model.
+
+Notice that ==cross-validation allows you to get an estimate of the performance of the model **and** how precise this estimate is (its standard deviation)==.
+Here the RMSE is about $\$66,574$ and $\sigma=\$1103$.
+The only downside is that the model needs to be trained several times, which can be costly and isn't always feasible.
+
+Computing the same metric on the linear regression model yields a RMSE of $\$70,003$ and $\sigma=\$4182$.
+The decision tree seems to perform slightly better, but the difference is minimal due to sever overfitting.
+
+**We know there's an overfitting problem because the training error (actually zero) is low while the validation error is high.**
+
+---
+
+### RandomForestRegressor

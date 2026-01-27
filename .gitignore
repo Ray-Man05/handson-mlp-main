@@ -4,3 +4,6 @@ my_stuff/notes/exercices/*
 */exercices/*
 */src/*
 */tmp.py
+.venv/*
+pyproject.toml
+.python-version

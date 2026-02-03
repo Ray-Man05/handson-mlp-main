@@ -7,3 +7,6 @@ my_stuff/notes/exercices/*
 .venv/*
 pyproject.toml
 .python-version
+
+*backup*.*
+*cleanup*.*

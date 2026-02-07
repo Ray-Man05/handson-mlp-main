@@ -10,3 +10,7 @@ pyproject.toml
 
 *backup*.*
 *cleanup*.*
+submission.csv
+notebooks/Kaggle/*
+*cat_feature_index*
+Kaggle/House Prices Advanced Regression Techniques/catboost_info/learn/events.out.tfevents
